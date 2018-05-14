@@ -1,5 +1,6 @@
 package battlecamp.Bots.QBot;
 
+
 import battlecamp.Model.Player;
 
 import java.util.ArrayList;
@@ -9,7 +10,7 @@ import java.util.Objects;
 
 public class State {
 
-    private List<Player.Type> types;
+    private List<Player.PlayerType> types;
     private List<Point> coords;
 
 
@@ -19,7 +20,7 @@ public class State {
         this.coords = new ArrayList<>();
         players.forEach(player -> {
             this.types.add(player.getType());
-            this.coords.add(new Point(player.getX(), player.getY()));
+            this.coords.add(new Point(player.getRow(), player.getColumn()));
         });
 
     }
@@ -33,11 +34,11 @@ public class State {
         return s;
     }
 
-    public List<Player.Type> getTypes() {
+    public List<Player.PlayerType> getTypes() {
         return types;
     }
 
-    public void setTypes(List<Player.Type> types) {
+    public void setTypes(List<Player.PlayerType> types) {
         this.types = types;
     }
 

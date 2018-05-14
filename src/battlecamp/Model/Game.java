@@ -1,131 +1,157 @@
 package battlecamp.Model;
 
-import battlecamp.Bots.QBot.State;
+import battlecamp.Interfaces.Tile;
 import battlecamp.Settings;
 
 import java.util.List;
+import java.util.Random;
+import java.util.stream.Collectors;
 
-public class Game {
+public class Game{
 
-    public enum Status {INITIALIZING, TRAINING, RUNNING, STOPPED}
-    public enum Move {NORTH, EAST, SOUTH, WEST}
+    public enum GameStatus {INITIALIZING, TRAINING, RUNNING, STOPPED}
+    public enum Move {UP, DOWN, LEFT, RIGHT}
 
-    private int id;
-    private Board board;
-    private List<Player> players;
+    public static GameStatus status;
+    private final Board board;
+    private final List<Player> players;
 
-    public static Status status;
-    private int playersTurn;
+    private final int MAX_TRAINING_EPOCHS;
+    private final boolean ALLOW_TRAINING;
 
-    public Game(int id, Board board, List<Player> players){
-        this.status = Status.INITIALIZING;
-        this.id = id;
+    public Game(Board board, List<Player> players, boolean allowTraining, int maxEpochs) {
+
+        this.status = GameStatus.INITIALIZING;
         this.board = board;
         this.players = players;
-        this.playersTurn = 0;
-        this.board.notifyObserver();
-        System.out.println("Board created... Placing players");
-        if(addPlayers()) {
-            System.out.println("Starting game");
-            start();
-        }
+        this.ALLOW_TRAINING = allowTraining;
+        this.MAX_TRAINING_EPOCHS = maxEpochs;
+        addPlayers();
+
+    }
+
+    public GameStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(GameStatus status) {
+        this.status = status;
     }
 
     public void start(){
-
-        long start = System.currentTimeMillis();
-        //train();
-        this.status = Status.RUNNING;
-        System.out.println("Training of " + Settings.TRAINING_EPOCHS + " epochs took " + (System.currentTimeMillis() - start) + "ms");
-
+        if(this.ALLOW_TRAINING)
+            train();
+        else
+            status = GameStatus.RUNNING;
         play();
+        timeout(500);
 
     }
 
     private void train(){
+        status = GameStatus.TRAINING;
         int episode = 0;
-        this.status = Status.TRAINING;
-        int moves = 0;
-        while(this.status == Status.TRAINING){
-            System.out.println("Training episode " + episode);
-            Player currentPlayer = this.players.get(this.playersTurn);
-            Move move = currentPlayer.doTrainingMove();
-            this.board.executeMove(currentPlayer, move);
+        while(status == GameStatus.TRAINING){
+            for(Player currentPlayer : this.players) {
+                Move move = currentPlayer.makeMove(this.board, this.players);
+                executeMove(currentPlayer, move);
+                if(gameEnded()){
+                    if(episode == MAX_TRAINING_EPOCHS)
+                        status = GameStatus.RUNNING;
+                    for(Player player : this.players) {
+                        player.reset();
+                    }
+                    addPlayers();
+                    episode++;
+                    break;
+                }
 
-            if(gameFinished(currentPlayer)) {
-                if(episode == Settings.TRAINING_EPOCHS)
-                    this.status = Status.RUNNING;
-                for(Player p : this.players)
-                    p.reset();
-                addPlayers();
-                episode++;
-                moves = 0;
             }
-            moves++;
-            nextTurn();
         }
     }
 
     private void play(){
-        while(this.status == Status.RUNNING){
-            Player currentPlayer = this.players.get(this.playersTurn);
-            Move move = currentPlayer.doMove();
-            this.board.executeMove(currentPlayer, move);
-
-            if(gameFinished(currentPlayer)) {
-                this.status = Status.STOPPED;
-                for(Player p : this.players)
-                    p.reset();
-            }
-
-            nextTurn();
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+        int moves = 0;
+        while(!status.equals(GameStatus.STOPPED)){
+            for(Player currentPlayer : this.players){
+                if(moves++ == Settings.MAX_MOVES)
+                    status = GameStatus.STOPPED;
+                timeout(200 / this.players.size());
+                Move move = currentPlayer.makeMove(this.board, this.players);
+                executeMove(currentPlayer, move);
+                if(gameEnded()){
+                    status = GameStatus.STOPPED;
+                    break;
+                }
             }
         }
     }
 
-    private boolean gameFinished(Player player){
-        if(player.hasWon()) {
+    private void timeout(int ms){
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private boolean gameEnded(){
+        if(this.players.stream().anyMatch(player -> player.getStatus().equals(Player.PlayerStatus.WON)))
             return true;
-        } else if(player.hasDied()){
-            return true;
-        }
-        return false;
+        return this.players.stream().noneMatch(player -> player.getStatus().equals(Player.PlayerStatus.ALIVE));
     }
 
-    private boolean addPlayers(){
-        for(Player player : this.players) {
-            if (!this.board.setPlayer(player)) {
-                System.out.println("Error: Could not find a suitable spot for player " + player);
-                return false;
+    private void executeMove(Player player, Move move){
+        int newRow = player.getRow();
+        int newCol = player.getColumn();
+        switch (move){
+            case UP:
+                newRow--;
+                break;
+            case DOWN:
+                newRow++;
+                break;
+            case LEFT:
+                newCol--;
+                break;
+            case RIGHT:
+                newCol++;
+                break;
+        }
+        Tile tileToMoveTo = this.board.getTile(newRow, newCol);
+        // Try to move the player to the new tile
+        if(tileToMoveTo == null)
+            return;
+        // Check if a player has won or died
+        Player otherPlayer = checkForPlayer(tileToMoveTo);
+        if(tileToMoveTo.movePlayer(player) && otherPlayer != null){
+            if(player.getType().equals(Player.PlayerType.PENGUIN) && otherPlayer.getType().equals(Player.PlayerType.SEA_LION)){
+                player.die();
+                otherPlayer.win();
+            } else if(player.getType().equals(Player.PlayerType.SEA_LION) && otherPlayer.getType().equals(Player.PlayerType.PENGUIN)){
+                player.win();
+                otherPlayer.die();
             }
-            player.joingGame(this);
         }
-        return true;
+
     }
 
-    private void nextTurn(){
-        this.playersTurn = this.playersTurn < this.players.size() - 1 ? this.playersTurn + 1 : 0;
-        if(Settings.MELT_ICE)
-            this.board.updateIce();
+    private void addPlayers(){
+        for(Player player : this.players){
+            List<Tile> validTiles = this.board.getValidSpawningTiles(player);
+            validTiles = validTiles.stream().filter(tile -> checkForPlayer(tile) == null).collect(Collectors.toList());
+            Tile tile = validTiles.get(new Random().nextInt(validTiles.size()));
+            player.move(tile.getRow(), tile.getColumn());
+        }
     }
 
-    public Status getStatus() {
-        return status;
+    private Player checkForPlayer(Tile tile){
+        return this.players
+                .stream()
+                .filter(player ->
+                        player.getRow() == tile.getRow() && player.getColumn() == tile.getColumn())
+                .findFirst()
+                .orElse(null);
     }
 
-    public List<Player> getPlayers() {
-        return players;
-    }
-
-    public State getState(){
-        return new State(this.players);
-    }
-
-    public Board getBoard() {
-        return board;
-    }
 }

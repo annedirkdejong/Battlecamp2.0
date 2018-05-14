@@ -1,27 +1,29 @@
 package battlecamp.Model;
 
-import battlecamp.Interfaces.Observer;
-import battlecamp.Interfaces.Subject;
+import battlecamp.Interfaces.Tile;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Random;
 import java.util.stream.Collectors;
 
-public class Board implements Subject{
+public class Board {
 
     private final int rows;
     private final int columns;
+
     private List<Tile> tiles;
 
-    private List<Observer> observers;
-    private Observer tileObserver;
-
-    public Board(int rows, int columns, Observer observer){
+    public Board(int rows, int columns){
         this.rows = rows;
         this.columns = columns;
-        this.tileObserver = observer;
         this.tiles = new ArrayList<>();
         generateBoard();
-        this.observers = new LinkedList<>();
+    }
+
+    public List<Tile> getTiles() {
+        return tiles;
     }
 
     public int getRows() {
@@ -32,97 +34,17 @@ public class Board implements Subject{
         return columns;
     }
 
-    public List<Tile> getTiles() {
-        return tiles;
-    }
-
-    public void executeMove(Player player, Game.Move move){
-        int nextX = player.getX();
-        int nextY = player.getY();
-        switch (move){
-            case NORTH:
-                nextY--;
-                break;
-            case EAST:
-                nextX++;
-                break;
-            case SOUTH:
-                nextY++;
-                break;
-            case WEST:
-                nextX--;
-                break;
-        }
-        Tile nextTile = this.getTile(nextX, nextY);
-        if(nextTile == null || nextTile.getType() == Tile.Type.ROCK)
-            return;
-        if(nextTile.getPlayer() != null){
-            if(player.getType() == Player.Type.PENGUIN && nextTile.getPlayer().getType() == Player.Type.SEALION)
-                player.die();
-            else if(player.getType() == Player.Type.SEALION && nextTile.getPlayer().getType() == Player.Type.PENGUIN){
-                nextTile.getPlayer().die();
-                player.win();
-            }
-            return;
-        }
-        if(player.getType() == Player.Type.SEALION && (nextTile.getType() == Tile.Type.WATER || nextTile.getType() == Tile.Type.IGLOO))
-            return;
-        if(player.getType() == Player.Type.PENGUIN && nextTile.getType() == Tile.Type.IGLOO)
-            player.win();
-        this.getTile(player.getX(), player.getY()).removePlayer();
-        this.getTile(nextX, nextY).setPlayer(player);
-    }
-
-    public void updateIce(){
-        this.tiles.stream()
-                .filter(tile -> tile.getType() == Tile.Type.WATER)
-                .skip(new Random().nextInt(this.tiles.size())).findFirst()
-                .ifPresent(tile -> tile.setType(Tile.Type.ICE));
-    }
-
-    public boolean setPlayer(Player player){
-        Tile t = null;
-        switch (player.getType()){
-            case PENGUIN:
-                List<Tile> validPenguinTiles = this.tiles.stream()
-                        .filter(tile -> tile.getType() != Tile.Type.ROCK && tile.getPlayer() == null && tile.getType() != Tile.Type.IGLOO && tile.getX() < this.columns / 2) //          <-- Replace magic number
-                        .collect(Collectors.toList());
-                if(validPenguinTiles.isEmpty())
-                    return false;
-                t = validPenguinTiles.get(new Random().nextInt(validPenguinTiles.size()));
-                break;
-            case SEALION:
-                List<Tile> validSeaLionTiles = this.tiles.stream()
-                        .filter(tile -> tile.getType() == Tile.Type.ICE && tile.getPlayer() == null && tile.getX() == this.columns / 2)
-                        .collect(Collectors.toList());
-                if(validSeaLionTiles.isEmpty())
-                    return false;
-                t = validSeaLionTiles.get(new Random().nextInt(validSeaLionTiles.size()));
-                break;
-        }
-        if(t != null){
-            this.getTile(t.getX(), t.getY()).setPlayer(player);
-            return true;
-        }
-        return false;
-    }
-
     private void generateBoard(){
         Random rand = new Random();
         int maxIceWidth = 26;               // <-- REPLACE MAGIC NUMBER
         for(int row = 0; row < this.rows; row++){
             for(int col = 0; col < this.columns; col++){
-                Tile.Type type = Tile.Type.ICE;
-                if (row > (columns / 2 - maxIceWidth / 2) && row < (columns / 2 + maxIceWidth / 2)) {
-                    int middle = Math.abs(columns / 2 - row);
-                    if (rand.nextInt(maxIceWidth) > middle - 1)
-                        type = Tile.Type.ICE;
-                }
                 if (rand.nextInt(10) > 7)
-                    type = Tile.Type.ROCK;
-                Tile tile = new Tile(row, col, type);
-                tile.register(this.tileObserver);
-                this.tiles.add(tile);
+                    this.tiles.add(new RockTile(row, col));
+                else if(row > (columns / 2 - maxIceWidth / 2) && row < (columns / 2 + maxIceWidth / 2) && rand.nextInt(maxIceWidth) > (Math.abs(columns / 2 - row)) - 1)
+                    this.tiles.add(new IceTile(row, col)); // <-- This should be WaterTile
+                else
+                    this.tiles.add(new IceTile(row, col));
             }
         }
         placeHouse();
@@ -131,24 +53,24 @@ public class Board implements Subject{
 
     private void placeHouse(){
         List<Tile> validTiles = this.tiles.stream()
-                .filter(tile -> tile.getType() != Tile.Type.ROCK && tile.getX() > this.columns - 5) //          <-- Replace magic number
+                .filter(tile -> tile.getClass() != RockTile.class && tile.getColumn() > this.columns - 5) //          <-- Replace magic number
                 .collect(Collectors.toList());
         Tile houseTile = validTiles.get(new Random().nextInt(validTiles.size()));
-        houseTile.setType(Tile.Type.IGLOO);
+        this.tiles.set(this.tiles.indexOf(houseTile), new IglooTile(houseTile.getRow(), houseTile.getColumn()));
 
-        Tile north = this.getTile(houseTile.getX(), houseTile.getY() + 1);
-        Tile south = this.getTile(houseTile.getX(), houseTile.getY() - 1);
-        Tile west = this.getTile(houseTile.getX() - 1, houseTile.getY());
-        Tile east = this.getTile(houseTile.getX() + 1, houseTile.getY());
-        if(north != null) north.setType(Tile.Type.ICE);
-        if(south != null) south.setType(Tile.Type.ICE);
-        if(west != null) west.setType(Tile.Type.ICE);
-        if(east != null) east.setType(Tile.Type.ICE);
+        Tile north = this.getTile(houseTile.getRow(), houseTile.getColumn() + 1);
+        Tile south = this.getTile(houseTile.getRow(), houseTile.getColumn() - 1);
+        Tile west = this.getTile(houseTile.getRow() - 1, houseTile.getColumn());
+        Tile east = this.getTile(houseTile.getRow() + 1, houseTile.getColumn());
+        if(north != null) this.tiles.set(this.tiles.indexOf(north), new IceTile(north.getRow(), north.getColumn()));
+        if(south != null) this.tiles.set(this.tiles.indexOf(south), new IceTile(south.getRow(), south.getColumn()));
+        if(west != null) this.tiles.set(this.tiles.indexOf(west), new IceTile(west.getRow(), west.getColumn()));
+        if(east != null) this.tiles.set(this.tiles.indexOf(east), new IceTile(east.getRow(), east.getColumn()));
     }
 
     private void fillCaves(){
         // First get the IGLOO tile
-        Tile igloo = this.tiles.stream().filter(tile -> tile.getType().equals(Tile.Type.IGLOO)).findFirst().orElse(null);
+        Tile igloo = this.tiles.stream().filter(tile -> tile.getClass().equals(IglooTile.class)).findFirst().orElse(null);
 
         // Get all tile connected to the igloo
         List<Tile> visitedTiles = new LinkedList<>();
@@ -156,58 +78,39 @@ public class Board implements Subject{
         newTiles.add(igloo);
         for(;;){
             visitedTiles.addAll(newTiles);
+            if(newTiles.isEmpty()) break;
             int totalTilesFound = visitedTiles.size();
             newTiles.clear();
             for(int i = 0; i < totalTilesFound; i++){
                 Tile t = visitedTiles.get(i);
-                Tile north = this.getTile(t.getX(), t.getY() + 1);
-                Tile south = this.getTile(t.getX(), t.getY() - 1);
-                Tile west = this.getTile(t.getX() - 1, t.getY());
-                Tile east = this.getTile(t.getX() + 1, t.getY());
-                if(north != null && !visitedTiles.contains(north) && !newTiles.contains(north) && (north.getType() == Tile.Type.ICE || north.getType() == Tile.Type.WATER)) newTiles.add(north);
-                if(south != null && !visitedTiles.contains(south) && !newTiles.contains(south) && (south.getType() == Tile.Type.ICE || south.getType() == Tile.Type.WATER)) newTiles.add(south);
-                if(west != null && !visitedTiles.contains(west) && !newTiles.contains(west) && (west.getType() == Tile.Type.ICE || west.getType() == Tile.Type.WATER)) newTiles.add(west);
-                if(east != null && !visitedTiles.contains(east) && !newTiles.contains(east) && (east.getType() == Tile.Type.ICE || east.getType() == Tile.Type.WATER)) newTiles.add(east);
+                Tile north = this.getTile(t.getRow() + 1, t.getColumn());
+                Tile south = this.getTile(t.getRow() - 1, t.getColumn());
+                Tile west = this.getTile(t.getRow(), t.getColumn() - 1);
+                Tile east = this.getTile(t.getRow(), t.getColumn() + 1);
+                if(north != null && !visitedTiles.contains(north) && !newTiles.contains(north) && (north.getClass().equals(IceTile.class) || north.getClass().equals(WaterTile.class))) newTiles.add(north);
+                if(south != null && !visitedTiles.contains(south) && !newTiles.contains(south) && (south.getClass().equals(IceTile.class) || south.getClass().equals(WaterTile.class))) newTiles.add(south);
+                if(west != null && !visitedTiles.contains(west) && !newTiles.contains(west) && (west.getClass().equals(IceTile.class) || west.getClass().equals(WaterTile.class))) newTiles.add(west);
+                if(east != null && !visitedTiles.contains(east) && !newTiles.contains(east) && (east.getClass().equals(IceTile.class) || east.getClass().equals(WaterTile.class))) newTiles.add(east);
             }
-            if(newTiles.isEmpty())
-                break;
         }
-
         // Change all tile that are not connected to ROCK
-        this.tiles.stream().filter(tile -> !visitedTiles.contains(tile)).forEach(tile -> tile.setType(Tile.Type.ROCK));
+        this.tiles.stream().filter(tile -> !visitedTiles.contains(tile)).forEach(tile -> this.tiles.set(this.tiles.indexOf(tile), new RockTile(tile.getRow(), tile.getColumn())));
     }
 
-    public Tile getTile(int x, int y){
-        if(x >= 0 && x < this.columns && y >= 0 && y < this.rows)
-            return this.tiles.get(x * this.columns + y);
+    public List<Tile> getValidSpawningTiles(Player player){
+        return this.tiles
+                .stream()
+                .filter(tile ->
+                        ((player.getType().equals(Player.PlayerType.PENGUIN) && tile.getColumn() < columns / 2) ||
+                                (player.getType().equals(Player.PlayerType.SEA_LION) && tile.getColumn() > columns / 2)) &&
+                                tile.isValidSpawn(player))
+                .collect(Collectors.toList());
+    }
+
+    public Tile getTile(int row, int column) throws IndexOutOfBoundsException{
+        if(row >= 0 && row < this.rows && column >= 0 && column < this.columns)
+            return this.tiles.get(row * this.columns + column);
         return null;
     }
 
-    public void setTiles(List<Tile> tiles) {
-        this.tiles = tiles;
-    }
-
-    @Override
-    public void register(Observer o) {
-        this.observers.add(o);
-    }
-
-    @Override
-    public void unregister(Observer o) {
-        this.observers.remove(o);
-    }
-
-    @Override
-    public void notifyObserver() {
-        for(Observer observer : this.observers){
-            if(observer != null)
-                observer.update(this);
-        }
-    }
-
-    public Board copy(){
-        Board b = new Board(this.getRows(), this.getColumns(), null);
-        b.setTiles(new ArrayList<>(this.tiles));
-        return b;
-    }
 }
